@@ -6,7 +6,6 @@ export const CURRENCY_SYMBOLS: Record<string, string> = {
   JPY: '¥',
 };
 
-// Approximate exchange rates relative to USD
 export const EXCHANGE_RATES: Record<string, number> = {
   USD: 1.0,
   INR: 83.5,
@@ -17,14 +16,10 @@ export const EXCHANGE_RATES: Record<string, number> = {
 
 export const SUPPORTED_CURRENCIES = Object.keys(EXCHANGE_RATES);
 
-/**
- * Converts an amount from one currency to another using approximate rates.
- */
 export function convertCurrency(amount: number, from: string, to: string): number {
   if (from === to) return amount;
   const fromRate = EXCHANGE_RATES[from] ?? EXCHANGE_RATES['USD'];
   const toRate = EXCHANGE_RATES[to] ?? EXCHANGE_RATES['USD'];
-  // Convert to USD first, then to target
   return (amount / fromRate) * toRate;
 }
 

@@ -3,17 +3,12 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import Navbar from '@/components/Navbar';
-import { CURRENCY_SYMBOLS, formatAmount, convertCurrency, SUPPORTED_CURRENCIES } from '@/lib/currency';
-import {
-  Wallet,
-  TrendingUp,
-  AlertTriangle,
-  Settings,
-  Plus,
-  Loader2,
-  Calendar,
-  CheckCircle,
-} from 'lucide-react';
+import { CURRENCY_SYMBOLS, formatAmount } from '@/lib/currency';
+import { AlertTriangle, Settings, Plus, Loader2 } from 'lucide-react';
+import LoadingScreen from '@/components/LoadingScreen';
+import { useDisplayCurrency } from '@/hooks/useDisplayCurrency';
+import { MONTH_SHORT_NAMES, formatMonthKey } from '@/lib/dates';
+import type { Expense } from '@/types';
 import {
   ResponsiveContainer,
   PieChart,
@@ -26,59 +21,18 @@ import {
   Tooltip,
 } from 'recharts';
 
-const CATEGORIES = ['Food', 'Transport', 'Utilities', 'Entertainment', 'Health', 'Shopping', 'Others'];
-const COLORS = ['#818cf8', '#34d399', '#f43f5e', '#fbbf24', '#a78bfa', '#2dd4bf', '#94a3b8'];
-
-interface Expense {
-  _id: string;
-  amount: number;
-  currency: string;
-  category: string;
-  date: string;
-  note: string;
-}
+import { CATEGORIES, CHART_THEME, getCategoryChartColor, STATUS_CLASSES, UI_CLASSES } from '@/lib/design';
 
 export default function Dashboard() {
   const { user, loading: authLoading, refreshUser } = useAuth();
+  const { displayCurrency, toDisplay } = useDisplayCurrency(user?.currency);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Budget settings state
   const [selectedCategory, setSelectedCategory] = useState('Food');
   const [budgetLimit, setBudgetLimit] = useState('');
   const [updatingBudget, setUpdatingBudget] = useState(false);
   const [budgetSuccess, setBudgetSuccess] = useState('');
-
-  // Currency preference state
-  const [selectedCurrency, setSelectedCurrency] = useState(user?.currency || 'USD');
-  const [updatingCurrency, setUpdatingCurrency] = useState(false);
-  const [currencySuccess, setCurrencySuccess] = useState('');
-
-  useEffect(() => {
-    if (user?.currency) setSelectedCurrency(user.currency);
-  }, [user]);
-
-  const handleCurrencyChange = async (newCurrency: string) => {
-    setSelectedCurrency(newCurrency);
-    setUpdatingCurrency(true);
-    setCurrencySuccess('');
-    try {
-      const res = await fetch('/api/user/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ currency: newCurrency }),
-      });
-      if (res.ok) {
-        setCurrencySuccess('Currency preference updated!');
-        await refreshUser();
-        setTimeout(() => setCurrencySuccess(''), 3000);
-      }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setUpdatingCurrency(false);
-    }
-  };
 
   const fetchExpenses = async () => {
     try {
@@ -87,8 +41,6 @@ export default function Dashboard() {
         const data = await res.json();
         setExpenses(data.expenses || []);
       }
-    } catch (err) {
-      console.error('Failed to fetch dashboard expenses:', err);
     } finally {
       setLoading(false);
     }
@@ -99,29 +51,11 @@ export default function Dashboard() {
   }, [user]);
 
   if (authLoading || (!user && loading)) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-950 text-white">
-        <div className="flex flex-col items-center gap-3">
-          <Loader2 className="h-10 w-10 animate-spin text-indigo-500" />
-          <p className="text-slate-400 text-sm">Loading your dashboard...</p>
-        </div>
-      </div>
-    );
+    return <LoadingScreen message="Loading your dashboard..." />;
   }
 
   if (!user) return null;
 
-  // ── Preferred display currency ─────────────────────────────────
-  const displayCurrency = user.currency || 'USD';
-
-  /**
-   * Convert any expense amount to the user's preferred display currency.
-   * Falls back to the expense's own currency if not supported.
-   */
-  const toDisplay = (amount: number, fromCurrency: string): number =>
-    convertCurrency(amount, fromCurrency || 'USD', displayCurrency);
-
-  // ── Date helpers ───────────────────────────────────────────────
   const today = new Date();
   const currentYear = today.getFullYear();
   const currentMonthNum = today.getMonth();
@@ -131,13 +65,10 @@ export default function Dashboard() {
     return d.getFullYear() === currentYear && d.getMonth() === currentMonthNum;
   });
 
-  // ── Total spent this month (converted) ────────────────────────
   const totalSpentThisMonth = thisMonthExpenses.reduce(
-    (sum, e) => sum + toDisplay(e.amount, e.currency),
-    0
+    (sum, e) => sum + toDisplay(e.amount, e.currency), 0
   );
 
-  // ── Category breakdown (converted) ────────────────────────────
   const categoryBreakdown = CATEGORIES.map((cat) => {
     const total = thisMonthExpenses
       .filter((e) => e.category === cat)
@@ -145,47 +76,42 @@ export default function Dashboard() {
     return { name: cat, value: total };
   }).filter((c) => c.value > 0);
 
-  // ── 6-Month trend (converted) ─────────────────────────────────
-  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const totalCategoryAmount = categoryBreakdown.reduce((s, c) => s + c.value, 0);
+  const largestCategory = categoryBreakdown.sort((a, b) => b.value - a.value)[0];
+
   const trendData = Array.from({ length: 6 })
     .map((_, i) => {
       const d = new Date();
       d.setMonth(today.getMonth() - i);
       const mNum = d.getMonth();
       const yNum = d.getFullYear();
-      const mStr = `${yNum}-${String(mNum + 1).padStart(2, '0')}`;
-
+      const mStr = formatMonthKey(yNum, mNum);
       const total = expenses
         .filter((e) => e.date.startsWith(mStr))
         .reduce((sum, e) => sum + toDisplay(e.amount, e.currency), 0);
-
       return {
-        month: `${monthNames[mNum]} ${yNum.toString().slice(-2)}`,
+        month: `${MONTH_SHORT_NAMES[mNum]} ${yNum.toString().slice(-2)}`,
         amount: Math.round(total * 100) / 100,
         sortKey: yNum * 12 + mNum,
+        isCurrent: mNum === currentMonthNum && yNum === currentYear,
       };
     })
     .sort((a, b) => a.sortKey - b.sortKey);
 
-  // ── Budget alerts (converted) ─────────────────────────────────
   const budgetAlerts: { category: string; limit: number; spent: number; percent: number }[] = [];
   const userBudgets = user.budgets || {};
-
   CATEGORIES.forEach((cat) => {
     const rawLimit = userBudgets[cat] || 0;
     if (rawLimit > 0) {
-      // Budget limits are stored in user's preferred currency
-      const limit = rawLimit;
       const spent = thisMonthExpenses
         .filter((e) => e.category === cat)
         .reduce((sum, e) => sum + toDisplay(e.amount, e.currency), 0);
-      const percent = (spent / limit) * 100;
-      budgetAlerts.push({ category: cat, limit, spent, percent });
+      budgetAlerts.push({ category: cat, limit: rawLimit, spent, percent: (spent / rawLimit) * 100 });
     }
   });
 
-  const exceededBudgetsCount = budgetAlerts.filter((b) => b.percent >= 100).length;
-  const warningBudgetsCount = budgetAlerts.filter((b) => b.percent >= 80 && b.percent < 100).length;
+  const alertCount = budgetAlerts.filter((b) => b.percent >= 80).length;
+  const overLimitCount = budgetAlerts.filter((b) => b.percent >= 100).length;
 
   const handleBudgetSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -204,224 +130,211 @@ export default function Dashboard() {
         await refreshUser();
         setTimeout(() => setBudgetSuccess(''), 3000);
       }
-    } catch (err) {
-      console.error(err);
     } finally {
       setUpdatingBudget(false);
     }
   };
 
   return (
-    <div className="flex flex-col min-h-screen bg-slate-950 text-slate-100">
+    <div className={UI_CLASSES.pageWrapper}>
       <Navbar />
 
-      <main className="flex-1 mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8 w-full space-y-8">
+      <main className="flex-1 mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8 w-full space-y-6">
 
-        {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-6">
+        <div className="flex flex-col md:flex-row md:items-start justify-between gap-2">
           <div>
-            <h1 className="text-3xl font-extrabold text-white tracking-tight">Dashboard</h1>
-            <p className="text-slate-400 text-sm mt-1">
-              Visual insights, budget alerts, and spending summary — all in{' '}
-              <span className="text-indigo-400 font-semibold">{displayCurrency}</span>
+            <h1 className="text-2xl font-bold text-white">Financial Overview</h1>
+            <p className="text-zinc-500 text-sm mt-1">
+              Real-time tracking of your spending across all active categories — values shown in {displayCurrency}.
             </p>
           </div>
-          <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-            <Calendar className="h-3.5 w-3.5" />
-            {today.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
-          </span>
-        </div>
-
-        {/* Metric Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-          {/* Card 1: Total Spent */}
-          <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-6 shadow-xl relative overflow-hidden group">
-            <div className="absolute top-0 right-0 w-24 h-24 bg-indigo-500/5 rounded-full blur-2xl group-hover:bg-indigo-500/10 transition-colors pointer-events-none" />
-            <div className="flex justify-between items-start">
-              <div>
-                <p className="text-slate-400 text-sm font-medium">Spent This Month</p>
-                <h3 className="text-3xl font-bold text-white mt-2">{formatAmount(totalSpentThisMonth, displayCurrency)}</h3>
-              </div>
-              <div className="p-3 bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 rounded-xl w-11 h-11 flex items-center justify-center font-bold text-lg">
-                {CURRENCY_SYMBOLS[displayCurrency] || displayCurrency}
-              </div>
-            </div>
-            <p className="text-xs text-slate-500 mt-4">Across {thisMonthExpenses.length} transactions</p>
-          </div>
-
-          {/* Card 2: Exceeded Budgets */}
-          <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-6 shadow-xl relative overflow-hidden group">
-            <div className="absolute top-0 right-0 w-24 h-24 bg-red-500/5 rounded-full blur-2xl group-hover:bg-red-500/10 transition-colors pointer-events-none" />
-            <div className="flex justify-between items-start">
-              <div>
-                <p className="text-slate-400 text-sm font-medium">Exceeded Budgets</p>
-                <h3 className="text-3xl font-bold text-white mt-2">{exceededBudgetsCount}</h3>
-              </div>
-              <div className={`p-3 rounded-xl border ${exceededBudgetsCount > 0 ? 'bg-red-500/15 border-red-500/30 text-red-400' : 'bg-slate-800 border-slate-700 text-slate-400'}`}>
-                <AlertTriangle className="h-5 w-5" />
-              </div>
-            </div>
-            <p className="text-xs text-slate-500 mt-4">Categories completely spent out</p>
-          </div>
-
-          {/* Card 3: Near Budget Limit */}
-          <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-6 shadow-xl relative overflow-hidden group">
-            <div className="absolute top-0 right-0 w-24 h-24 bg-amber-500/5 rounded-full blur-2xl group-hover:bg-amber-500/10 transition-colors pointer-events-none" />
-            <div className="flex justify-between items-start">
-              <div>
-                <p className="text-slate-400 text-sm font-medium">Near Budget Limit</p>
-                <h3 className="text-3xl font-bold text-white mt-2">{warningBudgetsCount}</h3>
-              </div>
-              <div className={`p-3 rounded-xl border ${warningBudgetsCount > 0 ? 'bg-amber-500/15 border-amber-500/30 text-amber-400' : 'bg-slate-800 border-slate-700 text-slate-400'}`}>
-                <TrendingUp className="h-5 w-5" />
-              </div>
-            </div>
-            <p className="text-xs text-slate-500 mt-4">Categories exceeding 80% limit</p>
-          </div>
-
-          {/* Card 4: Monitored Categories */}
-          <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-6 shadow-xl relative overflow-hidden group">
-            <div className="absolute top-0 right-0 w-24 h-24 bg-emerald-500/5 rounded-full blur-2xl group-hover:bg-emerald-500/10 transition-colors pointer-events-none" />
-            <div className="flex justify-between items-start">
-              <div>
-                <p className="text-slate-400 text-sm font-medium">Monitored Categories</p>
-                <h3 className="text-3xl font-bold text-white mt-2">{budgetAlerts.length}</h3>
-              </div>
-              <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-xl">
-                <CheckCircle className="h-5 w-5" />
-              </div>
-            </div>
-            <p className="text-xs text-slate-500 mt-4">Categories with configured limits</p>
+          <div className="flex items-center gap-1 bg-zinc-900 border border-zinc-800 rounded-lg p-1 text-sm">
+            <span className="px-3 py-1 text-zinc-500">
+              {MONTH_SHORT_NAMES[(currentMonthNum - 1 + 12) % 12]}
+            </span>
+            <span className="px-3 py-1 bg-zinc-800 text-white rounded-md font-medium">
+              {MONTH_SHORT_NAMES[currentMonthNum]} {currentYear}
+            </span>
+            <span className="px-3 py-1 text-zinc-500">
+              {MONTH_SHORT_NAMES[(currentMonthNum + 1) % 12]}
+            </span>
           </div>
         </div>
 
-        {/* Charts Row */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* 6-Month Trend Bar Chart */}
-          <div className="lg:col-span-2 bg-slate-900/30 border border-slate-800/80 rounded-2xl p-6 shadow-xl flex flex-col">
-            <div className="flex items-center justify-between mb-6">
-              <h3 className="text-lg font-bold text-white">Spending Trend (Last 6 Months)</h3>
-              <span className="text-xs text-slate-500">in {displayCurrency}</span>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className={UI_CLASSES.dashboardCard}>
+            <p className="text-xs font-semibold text-zinc-500 uppercase tracking-widest mb-3">Spent This Month</p>
+            <div className="flex items-baseline gap-3">
+              <h2 className="text-4xl font-bold text-white">{formatAmount(totalSpentThisMonth, displayCurrency)}</h2>
             </div>
-            <div className="flex-1 w-full h-[300px]">
+            <p className="text-zinc-500 text-sm mt-2">Across {thisMonthExpenses.length} transactions</p>
+          </div>
+
+          <div className={UI_CLASSES.dashboardCard}>
+            <p className="text-xs font-semibold text-zinc-500 uppercase tracking-widest mb-3">Budget Alerts</p>
+            <div className="flex items-baseline gap-3">
+              <h2 className="text-4xl font-bold text-white">{String(alertCount).padStart(2, '0')}</h2>
+              {overLimitCount > 0 && (
+                <span className="text-red-400 text-sm font-medium">{overLimitCount} over limit</span>
+              )}
+              {alertCount > 0 && overLimitCount === 0 && (
+                <span className="text-amber-400 text-sm font-medium">{alertCount} near limit</span>
+              )}
+            </div>
+            <p className="text-zinc-500 text-sm mt-2">Categories at or above 80% of limit</p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+
+          <div className={`lg:col-span-2 ${UI_CLASSES.dashboardCard}`}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-sm font-semibold text-zinc-100">Spending Trend</h3>
+              <span className="text-xs text-zinc-500">Last 6 Months ({displayCurrency})</span>
+            </div>
+            <div className="h-56">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={trendData} margin={{ left: -10, right: 10, top: 10, bottom: 0 }}>
-                  <XAxis dataKey="month" stroke="#64748b" fontSize={12} tickLine={false} />
-                  <YAxis stroke="#64748b" fontSize={12} tickLine={false} />
-                  <Tooltip
-                    contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155' }}
-                    labelStyle={{ color: '#ffffff', fontWeight: 600 }}
-                    formatter={(val: number) => [formatAmount(val, displayCurrency), 'Spent']}
+                <BarChart data={trendData} margin={{ top: 8, right: 8, bottom: 0, left: -16 }}>
+                  <XAxis
+                    dataKey="month"
+                    tick={{ fill: CHART_THEME.axisTick, fontSize: 10 }}
+                    tickLine={false}
+                    axisLine={false}
                   />
-                  <Bar dataKey="amount" fill="#6366f1" radius={[4, 4, 0, 0]}>
-                    {trendData.map((_, index) => (
-                      <Cell key={`cell-${index}`} fill={index === trendData.length - 1 ? '#818cf8' : '#4f46e5'} />
+                  <YAxis
+                    tick={{ fill: CHART_THEME.axisTickDim, fontSize: 10 }}
+                    tickLine={false}
+                    axisLine={false}
+                    tickFormatter={(v) => `₹${Math.round(Number(v) / 1000)}k`}
+                  />
+                  <Tooltip
+                    cursor={{ fill: CHART_THEME.cursorFill }}
+                    contentStyle={{ background: CHART_THEME.tooltipBg, border: `1px solid ${CHART_THEME.tooltipBorder}`, borderRadius: 8, fontSize: 12 }}
+                    labelStyle={{ color: CHART_THEME.tooltipLabel }}
+                    formatter={(val: any) => [formatAmount(Number(val || 0), displayCurrency), 'Spent']}
+                  />
+                  <Bar dataKey="amount" radius={[4, 4, 0, 0]}>
+                    {trendData.map((entry, i) => (
+                      <Cell key={i} fill={entry.isCurrent ? CHART_THEME.barCurrent : CHART_THEME.barInactive} />
                     ))}
                   </Bar>
-                </BarChart>
+                </BarChart> 
               </ResponsiveContainer>
             </div>
           </div>
 
-          {/* Category Pie Chart */}
-          <div className="bg-slate-900/30 border border-slate-800/80 rounded-2xl p-6 shadow-xl flex flex-col">
-            <div className="flex items-center justify-between mb-6">
-              <h3 className="text-lg font-bold text-white">Category Breakdown</h3>
-              <span className="text-xs text-slate-500">This month</span>
+          <div className={UI_CLASSES.dashboardCard}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-sm font-semibold text-zinc-100">Category Breakdown</h3>
+              <span className="text-xs text-zinc-500">This month</span>
             </div>
-            <div className="flex-1 w-full h-[240px] flex items-center justify-center">
-              {categoryBreakdown.length > 0 ? (
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={categoryBreakdown}
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={60}
-                      outerRadius={80}
-                      paddingAngle={4}
-                      dataKey="value"
-                    >
-                      {categoryBreakdown.map((entry, index) => {
-                        const colorIndex = CATEGORIES.indexOf(entry.name);
-                        return <Cell key={`cell-${index}`} fill={COLORS[colorIndex !== -1 ? colorIndex : 0]} />;
-                      })}
-                    </Pie>
-                    <Tooltip
-                      contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155' }}
-                      itemStyle={{ color: '#ffffff' }}
-                      formatter={(val: number) => [formatAmount(val, displayCurrency), '']}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
-              ) : (
-                <div className="text-slate-500 text-sm text-center">No data to show for this month.</div>
-              )}
-            </div>
-            {categoryBreakdown.length > 0 && (
-              <div className="grid grid-cols-2 gap-2 mt-4 text-xs">
-                {categoryBreakdown.map((entry) => {
-                  const colorIndex = CATEGORIES.indexOf(entry.name);
-                  return (
-                    <div key={entry.name} className="flex items-center gap-2">
-                      <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: COLORS[colorIndex !== -1 ? colorIndex : 0] }} />
-                      <span className="text-slate-300 truncate">{entry.name}</span>
+
+            {categoryBreakdown.length > 0 ? (
+              <>
+                <div className="relative h-44 flex items-center justify-center">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={categoryBreakdown}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={55}
+                        outerRadius={75}
+                        paddingAngle={3}
+                        dataKey="value"
+                        startAngle={90}
+                        endAngle={-270}
+                        stroke="none"
+                      >
+                        {categoryBreakdown.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={getCategoryChartColor(entry.name)} />
+                        ))}
+                      </Pie>
+                    </PieChart>
+                  </ResponsiveContainer>
+                  {largestCategory && (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                      <span className="text-zinc-500 text-xs">Largest</span>
+                      <span className="text-white text-sm font-bold">{largestCategory.name}</span>
                     </div>
-                  );
-                })}
+                  )}
+                </div>
+
+                <div className="space-y-2 mt-2">
+                  {categoryBreakdown.map((entry) => {
+                    const pct = totalCategoryAmount > 0
+                      ? Math.round((entry.value / totalCategoryAmount) * 100)
+                      : 0;
+                    return (
+                      <div key={entry.name} className="flex items-center justify-between text-xs">
+                        <div className="flex items-center gap-2">
+                          <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: getCategoryChartColor(entry.name) }} />
+                          <span className="text-zinc-300">{entry.name}</span>
+                        </div>
+                        <span className="text-zinc-400 font-medium">{pct}%</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            ) : (
+              <div className="h-44 flex items-center justify-center text-zinc-600 text-sm">
+                No data for this month.
               </div>
             )}
           </div>
         </div>
 
-        {/* Budget Tracker + Settings Row */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Budget Progress Bars */}
-          <div className="lg:col-span-2 bg-slate-900/30 border border-slate-800/80 rounded-2xl p-6 shadow-xl space-y-6">
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+
+          <div className={`lg:col-span-2 ${UI_CLASSES.dashboardCard} space-y-5`}>
             <div className="flex justify-between items-center">
-              <h3 className="text-lg font-bold text-white">Active Budget Tracker</h3>
-              <span className="text-xs text-slate-500">Values in {displayCurrency}</span>
+              <h3 className="text-sm font-semibold text-zinc-100">Active Budget Tracker</h3>
+              <span className="text-xs text-zinc-500">Values in {displayCurrency}</span>
             </div>
 
             {budgetAlerts.length === 0 ? (
-              <div className="text-center py-8 border border-dashed border-slate-800 rounded-xl text-slate-500 text-sm">
-                No active budget limits configured. Set limits in the Budget Settings panel.
+              <div className="text-center py-8 border border-dashed border-zinc-800 rounded-xl text-zinc-600 text-sm">
+                No budget limits set. Configure them in Budget Settings.
               </div>
             ) : (
               <div className="space-y-5">
                 {budgetAlerts.map((b) => {
                   const isExceeded = b.percent >= 100;
                   const isWarning = b.percent >= 80 && b.percent < 100;
-                  let barColor = 'bg-indigo-500';
-                  if (isExceeded) barColor = 'bg-red-500';
-                  else if (isWarning) barColor = 'bg-amber-500';
+                  const barColor = isExceeded
+                    ? STATUS_CLASSES.barExceeded
+                    : isWarning
+                      ? STATUS_CLASSES.barWarning
+                      : STATUS_CLASSES.barOk;
 
                   return (
-                    <div key={b.category} className="space-y-2">
+                    <div key={b.category} className="space-y-1.5">
                       <div className="flex items-center justify-between text-sm">
-                        <span className="font-semibold text-slate-300">{b.category}</span>
-                        <span className="text-slate-400">
-                          <strong className={isExceeded ? 'text-red-400' : isWarning ? 'text-amber-400' : 'text-slate-200'}>
+                        <span className="font-medium text-zinc-300">{b.category}</span>
+                        <span className="text-zinc-500">
+                          <strong className={isExceeded ? STATUS_CLASSES.textExceeded : isWarning ? STATUS_CLASSES.textWarning : 'text-zinc-200'}>
                             {formatAmount(b.spent, displayCurrency)}
-                          </strong>{' '}
-                          / {formatAmount(b.limit, displayCurrency)}
+                          </strong>
+                          {' / '}{formatAmount(b.limit, displayCurrency)}
                         </span>
                       </div>
-                      <div className="w-full h-2.5 bg-slate-800 rounded-full overflow-hidden">
+                      <div className="w-full h-2 bg-zinc-800 rounded-full overflow-hidden">
                         <div
                           className={`h-full rounded-full transition-all duration-500 ${barColor}`}
                           style={{ width: `${Math.min(b.percent, 100)}%` }}
                         />
                       </div>
                       <div className="flex justify-between items-center text-xs">
-                        <span className="text-slate-500">{b.percent.toFixed(0)}% consumed</span>
+                        <span className="text-zinc-600">{b.percent.toFixed(0)}% consumed</span>
                         {isExceeded && (
-                          <span className="text-red-400 font-medium flex items-center gap-1">
+                          <span className="text-red-400 flex items-center gap-1">
                             <AlertTriangle className="h-3 w-3" /> Exceeded limit
                           </span>
                         )}
                         {isWarning && (
-                          <span className="text-amber-400 font-medium">Warning: Exceeded 80%</span>
+                          <span className="text-amber-400">Warning: 80%+ reached</span>
                         )}
                       </div>
                     </div>
@@ -431,28 +344,25 @@ export default function Dashboard() {
             )}
           </div>
 
-          {/* Budget & Currency Settings Panel */}
-          <div className="bg-slate-900/30 border border-slate-800/80 rounded-2xl p-6 shadow-xl flex flex-col gap-6">
-
-            {/* Budget Limit Setup */}
+          <div className={`${UI_CLASSES.dashboardCard} flex flex-col gap-5`}>
             <div>
               <div className="flex items-center gap-2 mb-1">
-                <Settings className="h-4 w-4 text-indigo-400" />
-                <h3 className="text-base font-bold text-white">Budget Settings</h3>
+                <Settings className="h-4 w-4 text-emerald-400" />
+                <h3 className="text-sm font-semibold text-white">Budget Settings</h3>
               </div>
-              <p className="text-xs text-slate-400 mb-4">
-                Set monthly spending thresholds per category (stored in {displayCurrency}).
+              <p className="text-xs text-zinc-500 mb-4">
+                Set monthly spending thresholds per category.
               </p>
 
               {budgetSuccess && (
-                <div className="mb-3 p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs">
+                <div className={`mb-3 ${UI_CLASSES.alertSuccess}`}>
                   {budgetSuccess}
                 </div>
               )}
 
               <form onSubmit={handleBudgetSubmit} className="space-y-3">
                 <select
-                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-1 focus:ring-indigo-500 text-sm"
+                  className={UI_CLASSES.select + " w-full"}
                   value={selectedCategory}
                   onChange={(e) => setSelectedCategory(e.target.value)}
                 >
@@ -460,14 +370,14 @@ export default function Dashboard() {
                 </select>
 
                 <div className="flex gap-2">
-                  <span className="flex items-center px-3 bg-slate-800 border border-slate-700 rounded-lg text-slate-400 text-sm font-semibold">
+                  <span className="flex items-center px-3 bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-400 text-sm font-semibold">
                     {CURRENCY_SYMBOLS[displayCurrency] || displayCurrency}
                   </span>
                   <input
                     type="number"
                     min="1"
                     placeholder="e.g. 5000"
-                    className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-1 focus:ring-indigo-500 text-sm"
+                    className={UI_CLASSES.input + " flex-1"}
                     value={budgetLimit}
                     onChange={(e) => setBudgetLimit(e.target.value)}
                   />
@@ -476,7 +386,7 @@ export default function Dashboard() {
                 <button
                   type="submit"
                   disabled={updatingBudget}
-                  className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-medium py-2 rounded-lg text-sm transition-all flex items-center justify-center gap-1 cursor-pointer"
+                  className={`${UI_CLASSES.actionButton} w-full py-2`}
                 >
                   {updatingBudget ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
                   Save Budget Limit
@@ -484,42 +394,9 @@ export default function Dashboard() {
               </form>
             </div>
 
-            {/* Divider */}
-            <div className="border-t border-slate-800" />
-
-            {/* Preferred Currency */}
-            <div>
-              <div className="flex items-center gap-2 mb-1">
-                <Wallet className="h-4 w-4 text-indigo-400" />
-                <h4 className="text-base font-bold text-white">Display Currency</h4>
-              </div>
-              <p className="text-xs text-slate-400 mb-4">
-                All dashboard totals, charts, and budget bars will be shown in this currency.
-              </p>
-
-              {currencySuccess && (
-                <div className="mb-3 p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs">
-                  {currencySuccess}
-                </div>
-              )}
-
-              <select
-                disabled={updatingCurrency}
-                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-1 focus:ring-indigo-500 text-sm"
-                value={selectedCurrency}
-                onChange={(e) => handleCurrencyChange(e.target.value)}
-              >
-                <option value="USD">USD ($) — US Dollar</option>
-                <option value="INR">INR (₹) — Indian Rupee</option>
-                <option value="EUR">EUR (€) — Euro</option>
-                <option value="GBP">GBP (£) — British Pound</option>
-                <option value="JPY">JPY (¥) — Japanese Yen</option>
-              </select>
-            </div>
-
-            <div className="text-xs text-slate-600 mt-auto">
+            <p className="text-xs text-zinc-700 mt-auto">
               Budgets reset at the start of each calendar month.
-            </div>
+            </p>
           </div>
         </div>
       </main>
