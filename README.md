@@ -3,7 +3,7 @@
 A production-ready, full-stack Expense Tracker web application built using **Next.js 16 (App Router)**, **Tailwind CSS**, **MongoDB + Mongoose**, and **Gemini 2.5 Flash**. The application features custom JWT-based authentication, interactive charts, budget alerts, and an AI-powered text parser to auto-fill expense entries.
 
 ## 🔗 Live Application
-- **Live Demo Link**: [https://expense-tracker-ai-tishaaa12.vercel.app](https://expense-tracker-ai-tishaaa12.vercel.app)
+- **Live Demo Link**: [https://expense-tracker-ai-theta-seven.vercel.app](https://expense-tracker-ai-theta-seven.vercel.app)
 
 ---
 
