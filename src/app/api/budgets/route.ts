@@ -37,7 +37,6 @@ export async function POST(request: Request) {
       budgets: user.budgets,
     });
   } catch (error: any) {
-    console.error('Update budget error:', error);
     return NextResponse.json(
       { error: error.message || 'Internal Server Error' },
       { status: 500 }

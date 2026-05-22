@@ -33,7 +33,6 @@ export async function PUT(
 
     return NextResponse.json({ expense });
   } catch (error: any) {
-    console.error('Update expense error:', error);
     return NextResponse.json(
       { error: error.message || 'Internal Server Error' },
       { status: 500 }
@@ -62,7 +61,6 @@ export async function DELETE(
 
     return NextResponse.json({ message: 'Expense deleted successfully' });
   } catch (error: any) {
-    console.error('Delete expense error:', error);
     return NextResponse.json(
       { error: error.message || 'Internal Server Error' },
       { status: 500 }

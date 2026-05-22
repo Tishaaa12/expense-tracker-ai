@@ -35,8 +35,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } else {
         setUser(null);
       }
-    } catch (err) {
-      console.error('Me query error:', err);
+    } catch {
       setUser(null);
     } finally {
       setLoading(false);
@@ -92,8 +91,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(null);
       router.refresh();
       router.push('/login');
-    } catch (err) {
-      console.error('Logout error:', err);
+    } catch {
     }
   };
 

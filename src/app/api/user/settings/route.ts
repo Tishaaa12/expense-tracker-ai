@@ -33,7 +33,6 @@ export async function POST(request: Request) {
       currency: user.currency,
     });
   } catch (error: any) {
-    console.error('Update currency error:', error);
     return NextResponse.json(
       { error: error.message || 'Internal Server Error' },
       { status: 500 }

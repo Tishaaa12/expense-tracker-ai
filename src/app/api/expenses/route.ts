@@ -48,7 +48,6 @@ export async function GET(request: Request) {
       },
     });
   } catch (error: any) {
-    console.error('Fetch expenses error:', error);
     return NextResponse.json(
       { error: error.message || 'Internal Server Error' },
       { status: 500 }
@@ -86,7 +85,6 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ expense }, { status: 201 });
   } catch (error: any) {
-    console.error('Create expense error:', error);
     return NextResponse.json(
       { error: error.message || 'Internal Server Error' },
       { status: 500 }

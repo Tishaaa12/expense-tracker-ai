@@ -27,7 +27,6 @@ export async function POST(request: Request) {
       );
     }
 
-    // Get user's preferred currency for context
     await dbConnect();
     const user = await User.findById(userId);
     const preferredCurrency = user?.currency || 'USD';
@@ -122,7 +121,6 @@ Rules:
 
     return NextResponse.json(parsedData);
   } catch (error: any) {
-    console.error('AI extraction error:', error);
     return NextResponse.json(
       { error: error.message || 'Failed to parse text' },
       { status: 500 }
